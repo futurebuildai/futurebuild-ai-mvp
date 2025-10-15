@@ -17,13 +17,15 @@ def on_user_create_http(request):
     return "OK", 200
 
 # This is our original event-driven function. It will handle the real work.
+# The decorator was corrected from @cloudevent to @functions_framework.cloud_event
 @functions_framework.cloud_event
 def on_user_create_ce(cloud_event):
     """
     A CloudEvent function that triggers when a new Firebase Authentication
     user is created.
     """
-    # Extract the user's data from the trigger event
+    # The 'data' payload for audit log events is structured differently.
+    # We need to access the 'resourceName' from the 'protoPayload'.
     event_data = cloud_event.data["protoPayload"]["resourceName"]
     
     # The user's UID is the last part of the resourceName string
