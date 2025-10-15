@@ -1,13 +1,24 @@
 import firebase_admin
 from firebase_admin import auth, firestore
-from functions_framework import cloudevent
+import functions_framework
 
 # Initialize the Firebase Admin SDK. This is done once when the function starts.
 # The SDK will automatically use the project's default credentials.
 firebase_admin.initialize_app()
 
-@cloudevent
-def on_user_create(cloud_event):
+# This is our new HTTP function. Its only job is to exist and answer health checks.
+# This allows the Gen2 Cloud Function (a Cloud Run service) to start up successfully.
+@functions_framework.http
+def on_user_create_http(request):
+    """
+    An HTTP function that exists solely to satisfy the container startup
+    health check for Gen2 functions. It does not perform any logic.
+    """
+    return "OK", 200
+
+# This is our original event-driven function. It will handle the real work.
+@functions_framework.cloud_event
+def on_user_create_ce(cloud_event):
     """
     A CloudEvent function that triggers when a new Firebase Authentication
     user is created.
