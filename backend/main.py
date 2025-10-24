@@ -1,80 +1,68 @@
-import firebase_admin
-import datetime
 import functions_framework
-from firebase_admin import firestore
-from google.cloud.firestore import Client
+import firebase_admin
+from firebase_admin import firestore, auth
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 # Initialize Firebase Admin SDK
-# This is done once when the function instance starts.
-firebase_admin.initialize_app()
+try:
+    firebase_admin.get_app()
+except ValueError:
+    firebase_admin.initialize_app()
 
-# This is a generic CloudEvent function.
-# It will be triggered by the event specified in our gcloud deploy command.
 @functions_framework.cloud_event
-def on_user_create_function_gen1(cloud_event):
+def on_user_create(cloud_event):
     """
-    Triggered by the legacy 'providers/firebase.auth/eventTypes/user.create' event.
-    
-    This function creates a new 'organization' document in Firestore and
-    adds the new user to a 'users' subcollection within that organization
-    as the 'owner'.
+    Cloud Function trigger for new user creation in Firebase Authentication.
     """
+    db = firestore.client()
+
     try:
-        # The user data payload is in the 'data' attribute of the cloud_event
-        # This part is a "best guess" based on the legacy trigger.
-        # If it fails, the logs will show us the *actual* structure.
-        if not cloud_event.data:
-            print("No data found in cloud_event. Exiting.")
+        # Get the user data from the Cloud Event
+        user_data = cloud_event.data
+        if not user_data:
+            print("No user data in Cloud Event.")
             return
 
-        payload = cloud_event.data
-        
-        # We must now parse this payload. We *assume* it has 'uid' and 'email'.
-        # This is the part that will likely fail and need debugging (as expected).
-        uid = payload.get('uid')
-        email = payload.get('email')
+        uid = user_data.get("uid")
+        email = user_data.get("email")
 
-        if not uid or not email:
-            print(f"CloudEvent data payload is missing 'uid' or 'email'.")
-            print(f"Payload received: {payload}")
+        if not uid:
+            print("No UID in user data.")
             return
 
-        print(f"Processing new user: UID {uid}, Email {email}")
+        print(f"New user created: UID={uid}, Email={email}")
 
-        # Get the Firestore client
-        db: Client = firestore.client()
-
-        # 1. Create a new organization document
-        org_ref = db.collection('organizations').document()
-        org_id = org_ref.id
-        
-        org_name = "My First Organization"
-        
+        # 1. Create a new organization for this user
+        # We will use the user's UID as a preliminary name,
+        # and they can change it later.
         org_data = {
-            'org_name': org_name,
-            'created_at': datetime.datetime.now(datetime.timezone.utc),
-            'org_id': org_id
+            'name': f"{email}'s Organization",
+            'owner_uid': uid
         }
         
+        # Add the new organization to the 'organizations' collection
+        org_ref = db.collection('organizations').document()
         org_ref.set(org_data)
-        print(f"Successfully created organization {org_id} with name '{org_name}'")
-
-        # 2. Add the new user to the 'users' subcollection
-        user_ref = org_ref.collection('users').document(uid)
         
-        user_data_for_org = {
+        print(f"Created new organization with ID: {org_ref.id}")
+
+        # 2. Add this user to the 'users' subcollection of that new organization
+        user_in_org_data = {
             'email': email,
-            'role': 'owner',
-            'joined_at': datetime.datetime.now(datetime.timezone.utc)
+            'role': 'owner' # The user who signs up is the owner
         }
         
-        user_ref.set(user_data_for_org)
+        # Create the subcollection document
+        user_ref = db.collection('organizations').document(org_ref.id).collection('users').document(uid)
+        user_ref.set(user_in_org_data)
         
-        print(f"Successfully added user {uid} as 'owner' to organization {org_id}")
+        print(f"Added user {uid} to organization {org_ref.id} as owner.")
+        
+        print("Function execution successful.")
 
     except Exception as e:
-        # Log any errors that occur during execution.
-        print(f"Error processing new user: {e}")
-        # We also print the event data to help debug payload structure issues
-        print(f"Full event data: {cloud_event.data}")
-        raise
+        print(f"Error processing new user {uid}: {e}")
+        # Optionally, you could try to delete the auth user here to
+        # allow them to retry, but that could be complex.
+        # For now, we just log the error.
+        print("Error: Could not create organization structure.")
